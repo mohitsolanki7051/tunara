@@ -9,11 +9,9 @@ app.use(express.json());
 const server = http.createServer(app);
 const io = socketIo(server, { cors: { origin: "*" } });
 
-// ============ TUNNEL STORAGE ============
-// Memory Map — active socket connections ke liye
 const tunnels = new Map();
+const tokens = new Map();
 
-// Persistent storage — tunnel IDs Railway restart ke baad bhi rahenge
 const STORAGE_FILE = '/tmp/tunnels.json';
 
 function loadTunnels() {
@@ -23,15 +21,15 @@ function loadTunnels() {
             Object.entries(data).forEach(([id, info]) => {
                 tunnels.set(id, {
                     localUrl: info.localUrl,
-                    senderSocketId: null,  // restart pe socket gone
-                    isOnline: false,        // restart pe offline
+                    senderSocketId: null,
+                    isOnline: false,
                     createdAt: info.createdAt
                 });
             });
-            console.log(`📦 Loaded ${tunnels.size} tunnels from storage`);
+            console.log(`Loaded ${tunnels.size} tunnels from storage`);
         }
     } catch(e) {
-        console.log('⚠️ Could not load tunnels:', e.message);
+        console.log('Could not load tunnels:', e.message);
     }
 }
 
@@ -43,11 +41,10 @@ function saveTunnels() {
         }
         fs.writeFileSync(STORAGE_FILE, JSON.stringify(data));
     } catch(e) {
-        console.log('⚠️ Could not save tunnels:', e.message);
+        console.log('Could not save tunnels:', e.message);
     }
 }
 
-// Startup pe load karo
 loadTunnels();
 
 // ============ API ROUTES ============
@@ -64,14 +61,23 @@ app.post('/api/tunnel/register', (req, res) => {
         createdAt: Date.now()
     });
 
-    saveTunnels(); // File mein save karo
-
-    console.log(`✅ Tunnel registered: ${tunnelId} -> ${localUrl}`);
+    saveTunnels();
+    console.log(`Tunnel registered: ${tunnelId} -> ${localUrl}`);
     res.json({ success: true, tunnelId, publicUrl });
 });
 
+app.post('/api/token/store', (req, res) => {
+    const { token, userId } = req.body;
+    if (!token || !userId) {
+        return res.status(400).json({ success: false, message: 'Token and userId required.' });
+    }
+    tokens.set(token, userId);
+    console.log(`Token stored for user: ${userId}`);
+    res.json({ success: true });
+});
+
 app.get('/', (req, res) => {
-    res.send(`<h1>🚀 Tunnel Server</h1><p>Active tunnels: ${tunnels.size}</p>`);
+    res.send(`<h1>Tunnel Server</h1><p>Active tunnels: ${tunnels.size}</p>`);
 });
 
 // ============ VIEWER PAGE ============
@@ -80,9 +86,11 @@ app.get('/t/:tunnelId', (req, res) => {
     const { tunnelId } = req.params;
     const tunnel = tunnels.get(tunnelId);
     if (!tunnel) return res.status(404).send(`
-        <h2>Tunnel not found</h2>
-        <p>Tunnel ID <b>${tunnelId}</b> exist nahi karta.</p>
-        <p>Pehle <code>register</code> karo aur <code>node client.js</code> chalao.</p>
+        <!DOCTYPE html><html><body style="font-family:sans-serif;padding:40px;background:#0f0f0f;color:#fff">
+        <h2 style="color:#f87171">Tunnel Not Found</h2>
+        <p style="color:#888;margin-top:8px">Tunnel ID <b>${tunnelId}</b> does not exist.</p>
+        <p style="color:#555;margin-top:8px">Register a tunnel and start the Tunara desktop app.</p>
+        </body></html>
     `);
 
     const viewerHtml = `<!DOCTYPE html>
@@ -128,7 +136,7 @@ app.get('/t/:tunnelId', (req, res) => {
 <body>
 <div class="banner">
     <span class="dot" id="dot"></span>
-    <span>🔗 Tunnel &nbsp;|&nbsp; <b id="status">Connecting...</b></span>
+    <span>Tunnel &nbsp;|&nbsp; <b id="status">Connecting...</b></span>
     <span style="opacity:0.7;font-size:11px;margin-left:auto">ID: ${tunnelId}</span>
 </div>
 
@@ -145,7 +153,6 @@ app.get('/t/:tunnelId', (req, res) => {
 (function() {
     var TUNNEL_ID = '${tunnelId}';
     var socket = io({ transports: ['websocket', 'polling'] });
-
     var sessionCookies = '';
     var csrfToken = '';
     var currentPath = '/';
@@ -163,7 +170,7 @@ app.get('/t/:tunnelId', (req, res) => {
 
     socket.on('host-offline', function() {
         setStatus('Host Offline', true);
-        setText('❌ Host offline hai. node client.js chalao apne PC pe.');
+        setText('Host is offline. Please start the Tunara desktop app.');
     });
 
     socket.on('tunnel-info', function(data) {
@@ -282,22 +289,27 @@ app.get('/t/:tunnelId', (req, res) => {
 // ============ WEBSOCKET ============
 
 io.on('connection', (socket) => {
-    console.log('🔌 Connected:', socket.id);
+    console.log('Connected:', socket.id);
 
-    socket.on('sender-connect', ({ tunnelId, localUrl }) => {
+    socket.on('sender-connect', ({ tunnelId, localUrl, token }) => {
         const tunnel = tunnels.get(tunnelId);
         if (!tunnel) {
-            console.log('❌ Unknown tunnel:', tunnelId);
-            socket.emit('error', { message: 'Tunnel not found. Register first.' });
+            console.log('Unknown tunnel:', tunnelId);
+            socket.emit('auth-error', { message: 'Tunnel not found.' });
             return;
         }
+
+        if (token && !tokens.has(token)) {
+            console.log('Invalid token for tunnel:', tunnelId);
+            socket.emit('auth-error', { message: 'Invalid token.' });
+            return;
+        }
+
         tunnel.senderSocketId = socket.id;
         tunnel.isOnline = true;
         tunnel.localUrl = localUrl;
-        console.log(`✅ Sender online: ${tunnelId}`);
+        console.log(`Sender online: ${tunnelId}`);
         socket.emit('sender-confirm', { status: 'online' });
-
-        // Agar koi viewer pehle se wait kar raha ho to unhe notify karo
         io.to(tunnelId).emit('host-online');
     });
 
@@ -353,15 +365,16 @@ io.on('connection', (socket) => {
             if (tunnel.senderSocketId === socket.id) {
                 tunnel.isOnline = false;
                 tunnel.senderSocketId = null;
-                console.log(`⚠️ Sender offline: ${tunnelId}`);
+                console.log(`Sender offline: ${tunnelId}`);
                 io.to(tunnelId).emit('host-offline');
                 break;
             }
         }
+        console.log('Disconnected:', socket.id);
     });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`🚀 Tunnel Server running on port ${PORT}`);
+    console.log(`Tunnel Server running on port ${PORT}`);
 });
