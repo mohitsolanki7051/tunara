@@ -77,6 +77,7 @@ app.post('/api/token/store', (req, res) => {
 });
 
 app.get('/api/tunnel/status/:tunnelId', (req, res) => {
+    res.header('Access-Control-Allow-Origin', '*');
     const tunnel = tunnels.get(req.params.tunnelId);
     if (!tunnel) return res.json({ isOnline: false });
     res.json({ isOnline: tunnel.isOnline });
