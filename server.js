@@ -76,6 +76,12 @@ app.post('/api/token/store', (req, res) => {
     res.json({ success: true });
 });
 
+app.get('/api/tunnel/status/:tunnelId', (req, res) => {
+    const tunnel = tunnels.get(req.params.tunnelId);
+    if (!tunnel) return res.json({ isOnline: false });
+    res.json({ isOnline: tunnel.isOnline });
+});
+
 app.get('/', (req, res) => {
     res.send(`<h1>Tunnel Server</h1><p>Active tunnels: ${tunnels.size}</p>`);
 });
