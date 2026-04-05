@@ -113,7 +113,7 @@ app.get('/t/:tunnelId', (req, res) => {
         .banner {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 10px 20px;
+            padding: 0 16px;
             font-size: 13px;
             position: fixed;
             top: 0; left: 0; right: 0;
@@ -121,35 +121,81 @@ app.get('/t/:tunnelId', (req, res) => {
             display: flex;
             align-items: center;
             gap: 10px;
-            height: 42px;
+            height: 44px;
         }
-        .dot { width: 9px; height: 9px; border-radius: 50%; background: #4ade80; flex-shrink: 0; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; background: #4ade80; flex-shrink: 0; }
         .dot.off { background: #f87171; }
-        #frame-wrapper { position: fixed; top: 42px; left: 0; right: 0; bottom: 0; display: none; }
+        .banner-status { font-weight: 600; }
+        .banner-nav { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+        .nav-btn {
+            background: rgba(255,255,255,0.15);
+            border: none;
+            color: white;
+            width: 28px; height: 28px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex; align-items: center; justify-content: center;
+            transition: background 0.15s;
+        }
+        .nav-btn:hover:not(:disabled) { background: rgba(255,255,255,0.25); }
+        .nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+        .nav-btn svg { width: 14px; height: 14px; }
+        .home-btn {
+            background: rgba(255,255,255,0.15);
+            border: none;
+            color: white;
+            height: 28px;
+            padding: 0 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: background 0.15s;
+            display: flex; align-items: center; gap: 5px;
+        }
+        .home-btn:hover { background: rgba(255,255,255,0.25); }
+        .banner-id { opacity: 0.6; font-size: 11px; margin-left: 4px; }
+
+        #frame-wrapper { position: fixed; top: 44px; left: 0; right: 0; bottom: 0; display: none; }
         iframe { width: 100%; height: 100%; border: none; background: white; }
         .loading {
-            position: fixed; top: 42px; left: 0; right: 0; bottom: 0;
+            position: fixed; top: 44px; left: 0; right: 0; bottom: 0;
             display: flex; align-items: center; justify-content: center;
             flex-direction: column; gap: 16px; background: #f9fafb; color: #6b7280;
         }
         .spinner {
-            width: 40px; height: 40px;
+            width: 36px; height: 36px;
             border: 3px solid #e5e7eb; border-top-color: #667eea;
             border-radius: 50%; animation: spin 0.8s linear infinite;
         }
+        .loading-text { font-size: 14px; }
         @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
 <div class="banner">
     <span class="dot" id="dot"></span>
-    <span>Tunnel &nbsp;|&nbsp; <b id="status">Connecting...</b></span>
-    <span style="opacity:0.7;font-size:11px;margin-left:auto">ID: ${tunnelId}</span>
+    <span>Tunnel &nbsp;|&nbsp; <span class="banner-status" id="status">Connecting...</span></span>
+
+    <div class="banner-nav">
+        <button class="nav-btn" id="btn-back" onclick="goBack()" disabled title="Back">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>
+        </button>
+        <button class="nav-btn" id="btn-forward" onclick="goForward()" disabled title="Forward">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/></svg>
+        </button>
+        <button class="home-btn" onclick="goHome()" title="Home">
+            <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+            Home
+        </button>
+        <span class="banner-id">ID: ${tunnelId}</span>
+    </div>
 </div>
 
 <div class="loading" id="loading">
     <div class="spinner"></div>
-    <div id="loading-text">Connecting...</div>
+    <div class="loading-text" id="loading-text">Connecting...</div>
 </div>
 
 <div id="frame-wrapper">
@@ -165,6 +211,44 @@ app.get('/t/:tunnelId', (req, res) => {
     var currentPath = '/';
     var localUrl = '';
 
+    // Navigation history
+    var history = ['/'];
+    var historyIndex = 0;
+
+    function updateNavBtns() {
+        document.getElementById('btn-back').disabled = historyIndex <= 0;
+        document.getElementById('btn-forward').disabled = historyIndex >= history.length - 1;
+    }
+
+    function goBack() {
+        if (historyIndex <= 0) return;
+        historyIndex--;
+        var path = history[historyIndex];
+        currentPath = path;
+        showLoading('Loading...');
+        socket.emit('viewer-join', { tunnelId: TUNNEL_ID, path: path });
+        updateNavBtns();
+    }
+
+    function goForward() {
+        if (historyIndex >= history.length - 1) return;
+        historyIndex++;
+        var path = history[historyIndex];
+        currentPath = path;
+        showLoading('Loading...');
+        socket.emit('viewer-join', { tunnelId: TUNNEL_ID, path: path });
+        updateNavBtns();
+    }
+
+    function goHome() {
+        navigateTo('/');
+    }
+
+    // Expose to global scope for button onclick
+    window.goBack = goBack;
+    window.goForward = goForward;
+    window.goHome = goHome;
+
     socket.on('connect', function() {
         setStatus('Online', false);
         setText('Loading your project...');
@@ -178,6 +262,11 @@ app.get('/t/:tunnelId', (req, res) => {
     socket.on('host-offline', function() {
         setStatus('Host Offline', true);
         setText('Host is offline. Please start the Tunara desktop app.');
+    });
+
+    socket.on('host-online', function() {
+        setStatus('Online', false);
+        socket.emit('viewer-join', { tunnelId: TUNNEL_ID, path: currentPath });
     });
 
     socket.on('tunnel-info', function(data) {
@@ -200,6 +289,16 @@ app.get('/t/:tunnelId', (req, res) => {
     function navigateTo(url) {
         var path = url;
         try { var u = new URL(url); path = u.pathname + u.search + u.hash; } catch(e) {}
+
+        // Add to history only if different from current
+        if (path !== currentPath) {
+            // Remove forward history when navigating to new page
+            history = history.slice(0, historyIndex + 1);
+            history.push(path);
+            historyIndex = history.length - 1;
+            updateNavBtns();
+        }
+
         currentPath = path;
         showLoading('Loading...');
         socket.emit('viewer-join', { tunnelId: TUNNEL_ID, path: path });
@@ -285,6 +384,7 @@ app.get('/t/:tunnelId', (req, res) => {
     function setText(t) { document.getElementById('loading-text').textContent = t; }
 
     showLoading('Connecting...');
+    updateNavBtns();
 })();
 </script>
 </body>
