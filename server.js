@@ -13,6 +13,7 @@ const tunnels = new Map();
 const tokens = new Map();
 
 const STORAGE_FILE = '/tmp/tunnels.json';
+const LARAVEL_URL = process.env.LARAVEL_URL || 'https://tunara-web.up.railway.app';
 
 function loadTunnels() {
     try {
@@ -23,6 +24,7 @@ function loadTunnels() {
                     localUrl: info.localUrl,
                     senderSocketId: null,
                     isOnline: false,
+                    isProtected: info.isProtected || false,
                     createdAt: info.createdAt
                 });
             });
@@ -37,7 +39,11 @@ function saveTunnels() {
     try {
         const data = {};
         for (const [id, info] of tunnels) {
-            data[id] = { localUrl: info.localUrl, createdAt: info.createdAt };
+            data[id] = {
+                localUrl: info.localUrl,
+                isProtected: info.isProtected || false,
+                createdAt: info.createdAt
+            };
         }
         fs.writeFileSync(STORAGE_FILE, JSON.stringify(data));
     } catch(e) {
@@ -50,7 +56,7 @@ loadTunnels();
 // ============ API ROUTES ============
 
 app.post('/api/tunnel/register', (req, res) => {
-    const { localUrl } = req.body;
+    const { localUrl, isProtected } = req.body;
     const tunnelId = Math.random().toString(36).substring(2, 10);
     const publicUrl = `${req.protocol}://${req.get('host')}/t/${tunnelId}`;
 
@@ -58,11 +64,12 @@ app.post('/api/tunnel/register', (req, res) => {
         localUrl,
         senderSocketId: null,
         isOnline: false,
+        isProtected: isProtected || false,
         createdAt: Date.now()
     });
 
     saveTunnels();
-    console.log(`Tunnel registered: ${tunnelId} -> ${localUrl}`);
+    console.log(`Tunnel registered: ${tunnelId} -> ${localUrl} (protected: ${isProtected || false})`);
     res.json({ success: true, tunnelId, publicUrl });
 });
 
@@ -80,7 +87,7 @@ app.get('/api/tunnel/status/:tunnelId', (req, res) => {
     res.header('Access-Control-Allow-Origin', '*');
     const tunnel = tunnels.get(req.params.tunnelId);
     if (!tunnel) return res.json({ isOnline: false });
-    res.json({ isOnline: tunnel.isOnline });
+    res.json({ isOnline: tunnel.isOnline, isProtected: tunnel.isProtected || false });
 });
 
 app.get('/', (req, res) => {
@@ -169,20 +176,47 @@ app.get('/t/:tunnelId', (req, res) => {
             border: 3px solid #e5e7eb; border-top-color: #667eea;
             border-radius: 50%; animation: spin 0.8s linear infinite;
         }
-        .loading-text { font-size: 14px; }
+        .loading-text { font-size: 14px; text-align: center; }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Password form */
+        .pw-input {
+            background: #1a1a2e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: #fff;
+            font-size: 14px;
+            width: 200px;
+            outline: none;
+            font-family: system-ui, sans-serif;
+        }
+        .pw-input:focus { border-color: #667eea; }
+        .pw-btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border: none;
+            border-radius: 8px;
+            padding: 10px 18px;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: system-ui, sans-serif;
+        }
+        .pw-btn:hover { opacity: 0.9; }
+        .pw-error { font-size: 12px; color: #f87171; margin-top: 10px; display: none; }
     </style>
 </head>
 <body>
 <div class="banner">
     <div class="banner-nav">
-        <button class="nav-btn" id="btn-back" onclick="goBack()" disabled title="Back">
+        <button class="nav-btn" id="btn-back" disabled title="Back">
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>
         </button>
-        <button class="nav-btn" id="btn-forward" onclick="goForward()" disabled title="Forward">
+        <button class="nav-btn" id="btn-forward" disabled title="Forward">
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/></svg>
         </button>
-        <button class="home-btn" onclick="goHome()" title="Home">
+        <button class="home-btn" id="btn-home" title="Home">
             <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
             Home
         </button>
@@ -194,7 +228,7 @@ app.get('/t/:tunnelId', (req, res) => {
 </div>
 
 <div class="loading" id="loading">
-    <div class="spinner"></div>
+    <div class="spinner" id="spinner"></div>
     <div class="loading-text" id="loading-text">Connecting...</div>
 </div>
 
@@ -210,44 +244,38 @@ app.get('/t/:tunnelId', (req, res) => {
     var csrfToken = '';
     var currentPath = '/';
     var localUrl = '';
+    var isPasswordVerified = false;
 
     // Navigation history
-    var history = ['/'];
+    var navHistory = ['/'];
     var historyIndex = 0;
 
     function updateNavBtns() {
         document.getElementById('btn-back').disabled = historyIndex <= 0;
-        document.getElementById('btn-forward').disabled = historyIndex >= history.length - 1;
+        document.getElementById('btn-forward').disabled = historyIndex >= navHistory.length - 1;
     }
 
-    function goBack() {
+    document.getElementById('btn-back').addEventListener('click', function() {
         if (historyIndex <= 0) return;
         historyIndex--;
-        var path = history[historyIndex];
-        currentPath = path;
+        currentPath = navHistory[historyIndex];
         showLoading('Loading...');
-        socket.emit('viewer-join', { tunnelId: TUNNEL_ID, path: path });
+        socket.emit('viewer-join', { tunnelId: TUNNEL_ID, path: currentPath });
         updateNavBtns();
-    }
+    });
 
-    function goForward() {
-        if (historyIndex >= history.length - 1) return;
+    document.getElementById('btn-forward').addEventListener('click', function() {
+        if (historyIndex >= navHistory.length - 1) return;
         historyIndex++;
-        var path = history[historyIndex];
-        currentPath = path;
+        currentPath = navHistory[historyIndex];
         showLoading('Loading...');
-        socket.emit('viewer-join', { tunnelId: TUNNEL_ID, path: path });
+        socket.emit('viewer-join', { tunnelId: TUNNEL_ID, path: currentPath });
         updateNavBtns();
-    }
+    });
 
-    function goHome() {
+    document.getElementById('btn-home').addEventListener('click', function() {
         navigateTo('/');
-    }
-
-    // Expose to global scope for button onclick
-    window.goBack = goBack;
-    window.goForward = goForward;
-    window.goHome = goHome;
+    });
 
     socket.on('connect', function() {
         setStatus('Online', false);
@@ -261,17 +289,73 @@ app.get('/t/:tunnelId', (req, res) => {
 
     socket.on('host-offline', function() {
         setStatus('Host Offline', true);
+        document.getElementById('spinner').style.display = 'none';
         setText('Host is offline. Please start the Tunara desktop app.');
     });
 
     socket.on('host-online', function() {
         setStatus('Online', false);
+        document.getElementById('spinner').style.display = 'block';
         socket.emit('viewer-join', { tunnelId: TUNNEL_ID, path: currentPath });
     });
 
     socket.on('tunnel-info', function(data) {
         if (data.localUrl) localUrl = data.localUrl;
     });
+
+    // Password required
+    socket.on('password-required', function() {
+        setStatus('🔒 Protected', true);
+        document.getElementById('spinner').style.display = 'none';
+        document.getElementById('loading-text').innerHTML =
+            '<div style="text-align:center;">' +
+            '<div style="font-size:36px;margin-bottom:16px;">🔒</div>' +
+            '<p style="font-size:16px;font-weight:600;margin-bottom:6px;color:#1f2937;">Password Protected</p>' +
+            '<p style="font-size:13px;color:#9ca3af;margin-bottom:20px;">Enter the password to access this tunnel.</p>' +
+            '<div style="display:flex;gap:8px;justify-content:center;">' +
+            '<input type="password" id="tunnel-password" class="pw-input" placeholder="Enter password">' +
+            '<button class="pw-btn" id="pw-submit-btn">Unlock</button>' +
+            '</div>' +
+            '<p class="pw-error" id="pw-error">Wrong password. Try again.</p>' +
+            '</div>';
+
+        document.getElementById('pw-submit-btn').addEventListener('click', submitPassword);
+        document.getElementById('tunnel-password').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') submitPassword();
+        });
+        setTimeout(function() {
+            var input = document.getElementById('tunnel-password');
+            if (input) input.focus();
+        }, 100);
+    });
+
+    // Password wrong
+    socket.on('password-wrong', function() {
+        var err = document.getElementById('pw-error');
+        if (err) err.style.display = 'block';
+        var input = document.getElementById('tunnel-password');
+        if (input) { input.value = ''; input.focus(); }
+    });
+
+    // Request limit reached
+    socket.on('request-limited', function(data) {
+        setStatus('Limit Reached', true);
+        document.getElementById('spinner').style.display = 'none';
+        document.getElementById('loading-text').innerHTML =
+            '<div style="text-align:center;">' +
+            '<div style="font-size:36px;margin-bottom:16px;">⚠️</div>' +
+            '<p style="font-size:16px;font-weight:600;margin-bottom:6px;color:#1f2937;">Request Limit Reached</p>' +
+            '<p style="font-size:13px;color:#9ca3af;">This tunnel has reached its daily request limit. Please try again tomorrow or ask the owner to upgrade to Pro.</p>' +
+            '</div>';
+    });
+
+    function submitPassword() {
+        var pw = document.getElementById('tunnel-password');
+        if (!pw || !pw.value.trim()) return;
+        var err = document.getElementById('pw-error');
+        if (err) err.style.display = 'none';
+        socket.emit('viewer-join', { tunnelId: TUNNEL_ID, path: currentPath, password: pw.value.trim() });
+    }
 
     socket.on('page-content', function(data) {
         if (data.cookies) sessionCookies = data.cookies;
@@ -290,12 +374,10 @@ app.get('/t/:tunnelId', (req, res) => {
         var path = url;
         try { var u = new URL(url); path = u.pathname + u.search + u.hash; } catch(e) {}
 
-        // Add to history only if different from current
         if (path !== currentPath) {
-            // Remove forward history when navigating to new page
-            history = history.slice(0, historyIndex + 1);
-            history.push(path);
-            historyIndex = history.length - 1;
+            navHistory = navHistory.slice(0, historyIndex + 1);
+            navHistory.push(path);
+            historyIndex = navHistory.length - 1;
             updateNavBtns();
         }
 
@@ -379,6 +461,7 @@ app.get('/t/:tunnelId', (req, res) => {
     function showLoading(text) {
         document.getElementById('loading').style.display = 'flex';
         document.getElementById('frame-wrapper').style.display = 'none';
+        document.getElementById('spinner').style.display = 'block';
         setText(text || 'Loading...');
     }
     function setText(t) { document.getElementById('loading-text').textContent = t; }
@@ -415,15 +498,38 @@ io.on('connection', (socket) => {
         tunnel.senderSocketId = socket.id;
         tunnel.isOnline = true;
         tunnel.localUrl = localUrl;
-        console.log(`Sender online: ${tunnelId}`);
+        console.log(`Sender online: ${tunnelId} (protected: ${tunnel.isProtected})`);
         socket.emit('sender-confirm', { status: 'online' });
         io.to(tunnelId).emit('host-online');
     });
 
-    socket.on('viewer-join', ({ tunnelId, path }) => {
+    socket.on('viewer-join', async ({ tunnelId, path, password }) => {
         const tunnel = tunnels.get(tunnelId);
         if (!tunnel) return;
         if (!tunnel.isOnline) { socket.emit('host-offline'); return; }
+
+        // Password check
+        if (tunnel.isProtected) {
+            if (!password) {
+                socket.emit('password-required');
+                return;
+            }
+            try {
+                const res = await fetch(`${LARAVEL_URL}/api/tunnel/verify-password`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tunnel_id: tunnelId, password })
+                });
+                const data = await res.json();
+                if (!data.valid) {
+                    socket.emit('password-wrong');
+                    return;
+                }
+            } catch(e) {
+                console.log('Laravel unreachable for password check — allowing:', e.message);
+            }
+        }
+
         socket.join(tunnelId);
         socket.emit('tunnel-info', { localUrl: tunnel.localUrl });
         io.to(tunnel.senderSocketId).emit('request-page', {
