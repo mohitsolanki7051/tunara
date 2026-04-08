@@ -503,13 +503,13 @@ io.on('connection', (socket) => {
         io.to(tunnelId).emit('host-online');
     });
 
-    socket.on('viewer-join', async ({ tunnelId, path, password }) => {
+   socket.on('viewer-join', async ({ tunnelId, path, password }) => {
         const tunnel = tunnels.get(tunnelId);
         if (!tunnel) return;
         if (!tunnel.isOnline) { socket.emit('host-offline'); return; }
 
-        // Password check
-        if (tunnel.isProtected) {
+        // Already verified check
+        if (tunnel.isProtected && !socket.passwordVerified) {
             if (!password) {
                 socket.emit('password-required');
                 return;
@@ -525,8 +525,10 @@ io.on('connection', (socket) => {
                     socket.emit('password-wrong');
                     return;
                 }
+                // Mark as verified
+                socket.passwordVerified = true;
             } catch(e) {
-                console.log('Laravel unreachable for password check — allowing:', e.message);
+                console.log('Laravel unreachable — allowing');
             }
         }
 
