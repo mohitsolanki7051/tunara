@@ -95,7 +95,26 @@ app.get('/', (req, res) => {
 });
 
 // ============ VIEWER PAGE ============
+app.get('/t/:tunnelId/*', async (req, res) => {
+    const { tunnelId } = req.params;
+    const tunnel = tunnels.get(tunnelId);
+    
+    if (!tunnel || !tunnel.isOnline) {
+        return res.status(404).send('Not found');
+    }
 
+    const assetPath = '/' + req.params[0];
+    
+    try {
+        const response = await fetch(`${tunnel.localUrl}${assetPath}`);
+        const contentType = response.headers.get('content-type') || 'application/octet-stream';
+        res.setHeader('Content-Type', contentType);
+        const buffer = await response.arrayBuffer();
+        res.send(Buffer.from(buffer));
+    } catch(e) {
+        res.status(404).send('Asset not found');
+    }
+});
 app.get('/t/:tunnelId', (req, res) => {
     const { tunnelId } = req.params;
     const tunnel = tunnels.get(tunnelId);
@@ -405,7 +424,7 @@ app.get('/t/:tunnelId', (req, res) => {
 
     function renderPage(html, base, path) {
         var frame = document.getElementById('frame');
-        var safeBase = 'https://tunnel.tunara.online/t/${tunnelId}';
+        var safeBase = base || 'http://127.0.0.1:8000';
         var processed = html.replace(/<base[^>]*>/gi, '');
 
         var inject = '<base href="' + safeBase + '/">'
