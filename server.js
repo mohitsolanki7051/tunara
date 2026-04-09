@@ -12,8 +12,6 @@ const io = socketIo(server, { cors: { origin: "*" } });
 const tunnels = new Map();
 const tokens = new Map();
 
-const pendingStaticRequests = new Map();
-
 const STORAGE_FILE = '/tmp/tunnels.json';
 const LARAVEL_URL = process.env.LARAVEL_URL || 'https://tunara-web.up.railway.app';
 
@@ -97,31 +95,7 @@ app.get('/', (req, res) => {
 });
 
 // ============ VIEWER PAGE ============
-app.use('/t/:tunnelId', async (req, res, next) => {
-    const { tunnelId } = req.params;
-    const filePath = req.path.replace(/^\//, '');
-    
-    if (!filePath) return next();
-    
-    const tunnel = tunnels.get(tunnelId);
-    if (!tunnel || !tunnel.isOnline) return next();
-    
-    const requestId = Date.now() + '-' + Math.random();
-    const ext = filePath.split('.').pop().toLowerCase();
-    
-    const timeout = setTimeout(() => {
-        pendingStaticRequests.delete(requestId);
-        if (!res.headersSent) res.status(404).send('Not found');
-    }, 10000);
-    
-    pendingStaticRequests.set(requestId, { res, timeout, ext });
-    
-    io.to(tunnel.senderSocketId).emit('request-page', {
-        requestId,
-        path: '/' + filePath,
-        viewerSocketId: 'static-' + requestId
-    });
-});
+
 app.get('/t/:tunnelId', (req, res) => {
     const { tunnelId } = req.params;
     const tunnel = tunnels.get(tunnelId);
@@ -583,35 +557,19 @@ io.on('connection', (socket) => {
         }
     });
 
-socket.on('page-response', ({ requestId, html, viewerSocketId, cookies, csrfToken, currentPath, redirectUrl }) => {
-    // Static file request check karo
-    if (viewerSocketId && viewerSocketId.startsWith('static-')) {
-        const ext = (requestId || '').split('.').pop().toLowerCase();
-        const types = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', css: 'text/css', js: 'application/javascript', ico: 'image/x-icon', webp: 'image/webp' };
-        const pending = pendingStaticRequests.get(requestId);
-        if (pending) {
-            clearTimeout(pending.timeout);
-            pending.res.set('Content-Type', types[pending.ext] || 'application/octet-stream');
-            pending.res.send(Buffer.isBuffer(html) ? html : Buffer.from(html || ''));
-            pendingStaticRequests.delete(requestId);
+    socket.on('page-response', ({ html, viewerSocketId, cookies, csrfToken, currentPath, redirectUrl }) => {
+        if (redirectUrl) {
+            io.to(viewerSocketId).emit('redirect', { url: redirectUrl });
+        } else {
+            io.to(viewerSocketId).emit('page-content', { html, cookies, csrfToken, currentPath });
         }
-        return;
-    }
-    
-    if (redirectUrl) {
-        io.to(viewerSocketId).emit('redirect', { url: redirectUrl });
-    } else {
-        const tunnelId = getTunnelIdByViewer(viewerSocketId);
-        io.to(viewerSocketId).emit('page-content', { html: replaceLocalUrls(html, tunnelId), cookies, csrfToken, currentPath });
-    }
-});
+    });
 
     socket.on('request-response', ({ html, viewerSocketId, redirectUrl, cookies, csrfToken, currentPath }) => {
         if (redirectUrl) {
             io.to(viewerSocketId).emit('redirect', { url: redirectUrl });
         } else {
-            const tunnelId = getTunnelIdByViewer(viewerSocketId);
-            io.to(viewerSocketId).emit('page-content', { html: replaceLocalUrls(html, tunnelId), cookies, csrfToken, currentPath });
+            io.to(viewerSocketId).emit('page-content', { html, cookies, csrfToken, currentPath });
         }
     });
 
@@ -635,19 +593,3 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`Tunnel Server running on port ${PORT}`);
 });
-
-function replaceLocalUrls(html, tunnelId) {
-    if (typeof html !== 'string') return html;
-    const publicUrl = `https://tunnel.tunara.online/t/${tunnelId}`;
-    return html
-        .replace(/https?:\/\/127\.0\.0\.1:\d+/g, publicUrl)
-        .replace(/https?:\/\/localhost:\d+/g, publicUrl);
-}
-
-function getTunnelIdByViewer(viewerSocketId) {
-    for (const [tunnelId] of tunnels) {
-        const room = io.sockets.adapter.rooms.get(tunnelId);
-        if (room && room.has(viewerSocketId)) return tunnelId;
-    }
-    return null;
-}
