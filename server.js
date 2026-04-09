@@ -12,6 +12,8 @@ const io = socketIo(server, { cors: { origin: "*" } });
 const tunnels = new Map();
 const tokens = new Map();
 
+const pendingStaticRequests = new Map();
+
 const STORAGE_FILE = '/tmp/tunnels.json';
 const LARAVEL_URL = process.env.LARAVEL_URL || 'https://tunara-web.up.railway.app';
 
@@ -104,31 +106,21 @@ app.use('/t/:tunnelId', async (req, res, next) => {
     const tunnel = tunnels.get(tunnelId);
     if (!tunnel || !tunnel.isOnline) return next();
     
-    // Electron app ko image fetch karne ko bolo
     const requestId = Date.now() + '-' + Math.random();
+    const ext = filePath.split('.').pop().toLowerCase();
     
     const timeout = setTimeout(() => {
-        res.status(404).send('Not found');
+        pendingStaticRequests.delete(requestId);
+        if (!res.headersSent) res.status(404).send('Not found');
     }, 10000);
+    
+    pendingStaticRequests.set(requestId, { res, timeout, ext });
     
     io.to(tunnel.senderSocketId).emit('request-page', {
         requestId,
         path: '/' + filePath,
         viewerSocketId: 'static-' + requestId
     });
-    
-    // Response ka wait karo
-    const handler = ({ requestId: rid, html, cookies }) => {
-        if (rid !== requestId) return;
-        clearTimeout(timeout);
-        // Content type detect karo
-        const ext = filePath.split('.').pop().toLowerCase();
-        const types = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', css: 'text/css', js: 'application/javascript', ico: 'image/x-icon', webp: 'image/webp' };
-        res.set('Content-Type', types[ext] || 'application/octet-stream');
-        res.send(html);
-    };
-    
-    io.once('page-response', handler);
 });
 app.get('/t/:tunnelId', (req, res) => {
     const { tunnelId } = req.params;
@@ -591,14 +583,28 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('page-response', ({ html, viewerSocketId, cookies, csrfToken, currentPath, redirectUrl }) => {
-        if (redirectUrl) {
-            io.to(viewerSocketId).emit('redirect', { url: redirectUrl });
-        } else {
-            const tunnelId = getTunnelIdByViewer(viewerSocketId);
-            io.to(viewerSocketId).emit('page-content', { html: replaceLocalUrls(html, tunnelId), cookies, csrfToken, currentPath });
+socket.on('page-response', ({ requestId, html, viewerSocketId, cookies, csrfToken, currentPath, redirectUrl }) => {
+    // Static file request check karo
+    if (viewerSocketId && viewerSocketId.startsWith('static-')) {
+        const ext = (requestId || '').split('.').pop().toLowerCase();
+        const types = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', css: 'text/css', js: 'application/javascript', ico: 'image/x-icon', webp: 'image/webp' };
+        const pending = pendingStaticRequests.get(requestId);
+        if (pending) {
+            clearTimeout(pending.timeout);
+            pending.res.set('Content-Type', types[pending.ext] || 'application/octet-stream');
+            pending.res.send(Buffer.isBuffer(html) ? html : Buffer.from(html || ''));
+            pendingStaticRequests.delete(requestId);
         }
-    });
+        return;
+    }
+    
+    if (redirectUrl) {
+        io.to(viewerSocketId).emit('redirect', { url: redirectUrl });
+    } else {
+        const tunnelId = getTunnelIdByViewer(viewerSocketId);
+        io.to(viewerSocketId).emit('page-content', { html: replaceLocalUrls(html, tunnelId), cookies, csrfToken, currentPath });
+    }
+});
 
     socket.on('request-response', ({ html, viewerSocketId, redirectUrl, cookies, csrfToken, currentPath }) => {
         if (redirectUrl) {
