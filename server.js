@@ -95,26 +95,7 @@ app.get('/', (req, res) => {
 });
 
 // ============ VIEWER PAGE ============
-app.get('/t/:tunnelId/:path(*)', async (req, res) => {
-    const { tunnelId } = req.params;
-    const tunnel = tunnels.get(tunnelId);
-    
-    if (!tunnel || !tunnel.isOnline) {
-        return res.status(404).send('Not found');
-    }
 
-    const assetPath = '/' + req.params.path;
-    
-    try {
-        const response = await fetch(`${tunnel.localUrl}${assetPath}`);
-        const contentType = response.headers.get('content-type') || 'application/octet-stream';
-        res.setHeader('Content-Type', contentType);
-        const buffer = await response.arrayBuffer();
-        res.send(Buffer.from(buffer));
-    } catch(e) {
-        res.status(404).send('Asset not found');
-    }
-});
 app.get('/t/:tunnelId', (req, res) => {
     const { tunnelId } = req.params;
     const tunnel = tunnels.get(tunnelId);
