@@ -95,9 +95,8 @@ app.get('/', (req, res) => {
 });
 
 // ============ VIEWER PAGE ============
-app.get('/t/:tunnelId/*', async (req, res) => {
-    const { tunnelId } = req.params;
-    const filePath = req.params[0];
+app.get('/t/:tunnelId/:filePath(*)', async (req, res) => {
+    const { tunnelId, filePath } = req.params;
     const tunnel = tunnels.get(tunnelId);
     
     if (!tunnel || !tunnel.isOnline) return res.status(404).send('Not found');
