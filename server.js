@@ -98,11 +98,14 @@ app.get('/', (req, res) => {
 app.use('/t/:tunnelId', async (req, res, next) => {
     const { tunnelId } = req.params;
     const filePath = req.path.replace(/^\//, '');
-    
+        console.log(`Static request: tunnelId=${tunnelId} filePath=${filePath}`);
+
     // Agar koi filePath nahi hai to viewer page show karo
     if (!filePath) return next();
     
     const tunnel = tunnels.get(tunnelId);
+        console.log(`Tunnel found: ${!!tunnel}, isOnline: ${tunnel?.isOnline}`);
+
     if (!tunnel || !tunnel.isOnline) return next();
     
     const localUrl = tunnel.localUrl.replace(/\/$/, '');
