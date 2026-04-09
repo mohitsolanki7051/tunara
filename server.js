@@ -98,32 +98,37 @@ app.get('/', (req, res) => {
 app.use('/t/:tunnelId', async (req, res, next) => {
     const { tunnelId } = req.params;
     const filePath = req.path.replace(/^\//, '');
-        console.log(`Static request: tunnelId=${tunnelId} filePath=${filePath}`);
-
-    // Agar koi filePath nahi hai to viewer page show karo
+    
     if (!filePath) return next();
     
     const tunnel = tunnels.get(tunnelId);
-        console.log(`Tunnel found: ${!!tunnel}, isOnline: ${tunnel?.isOnline}`);
-
     if (!tunnel || !tunnel.isOnline) return next();
     
-    const localUrl = tunnel.localUrl.replace(/\/$/, '');
+    // Electron app ko image fetch karne ko bolo
+    const requestId = Date.now() + '-' + Math.random();
     
-    try {
-        const response = await fetch(`${localUrl}/${filePath}`);
-            console.log(`Fetch: ${localUrl}/${filePath} → status: ${response.status}`);
-
-        if (!response.ok) return next();
-        const buffer = await response.arrayBuffer();
-        const contentType = response.headers.get('content-type') || 'application/octet-stream';
-        res.set('Content-Type', contentType);
-        res.send(Buffer.from(buffer));
-    } catch(e) {
-            console.log(`Fetch error: ${e.message}`);
-
-        next();
-    }
+    const timeout = setTimeout(() => {
+        res.status(404).send('Not found');
+    }, 10000);
+    
+    io.to(tunnel.senderSocketId).emit('request-page', {
+        requestId,
+        path: '/' + filePath,
+        viewerSocketId: 'static-' + requestId
+    });
+    
+    // Response ka wait karo
+    const handler = ({ requestId: rid, html, cookies }) => {
+        if (rid !== requestId) return;
+        clearTimeout(timeout);
+        // Content type detect karo
+        const ext = filePath.split('.').pop().toLowerCase();
+        const types = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', css: 'text/css', js: 'application/javascript', ico: 'image/x-icon', webp: 'image/webp' };
+        res.set('Content-Type', types[ext] || 'application/octet-stream');
+        res.send(html);
+    };
+    
+    io.once('page-response', handler);
 });
 app.get('/t/:tunnelId', (req, res) => {
     const { tunnelId } = req.params;
