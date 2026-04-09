@@ -95,7 +95,7 @@ app.get('/', (req, res) => {
 });
 
 // ============ VIEWER PAGE ============
-app.get('/t/:tunnelId/*', async (req, res) => {
+app.get('/t/:tunnelId/:path(*)', async (req, res) => {
     const { tunnelId } = req.params;
     const tunnel = tunnels.get(tunnelId);
     
@@ -103,7 +103,7 @@ app.get('/t/:tunnelId/*', async (req, res) => {
         return res.status(404).send('Not found');
     }
 
-    const assetPath = '/' + req.params[0];
+    const assetPath = '/' + req.params.path;
     
     try {
         const response = await fetch(`${tunnel.localUrl}${assetPath}`);
