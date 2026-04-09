@@ -95,23 +95,27 @@ app.get('/', (req, res) => {
 });
 
 // ============ VIEWER PAGE ============
-app.get('/t/:tunnelId/:filePath(*)', async (req, res) => {
-    const { tunnelId, filePath } = req.params;
-    const tunnel = tunnels.get(tunnelId);
+app.use('/t/:tunnelId', async (req, res, next) => {
+    const { tunnelId } = req.params;
+    const filePath = req.path.replace(/^\//, '');
     
-    if (!tunnel || !tunnel.isOnline) return res.status(404).send('Not found');
+    // Agar koi filePath nahi hai to viewer page show karo
+    if (!filePath) return next();
+    
+    const tunnel = tunnels.get(tunnelId);
+    if (!tunnel || !tunnel.isOnline) return next();
     
     const localUrl = tunnel.localUrl.replace(/\/$/, '');
     
     try {
         const response = await fetch(`${localUrl}/${filePath}`);
-        if (!response.ok) return res.status(response.status).send('Not found');
+        if (!response.ok) return next();
         const buffer = await response.arrayBuffer();
         const contentType = response.headers.get('content-type') || 'application/octet-stream';
         res.set('Content-Type', contentType);
         res.send(Buffer.from(buffer));
     } catch(e) {
-        res.status(404).send('Not found');
+        next();
     }
 });
 app.get('/t/:tunnelId', (req, res) => {
