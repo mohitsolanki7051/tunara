@@ -15,15 +15,6 @@ const tokens = new Map();
 const STORAGE_FILE = '/tmp/tunnels.json';
 const LARAVEL_URL = process.env.LARAVEL_URL || 'https://tunara-web.up.railway.app';
 
-function rewriteAssets(html, localUrl, tunnelPublicUrl) {
-    if (!html || !localUrl) return html;
-    const base = localUrl.replace(/\/$/, '');
-    return html.replace(
-        new RegExp(base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'),
-        tunnelPublicUrl
-    );
-}
-
 function loadTunnels() {
     try {
         if (fs.existsSync(STORAGE_FILE)) {
@@ -414,7 +405,7 @@ app.get('/t/:tunnelId', (req, res) => {
 
     function renderPage(html, base, path) {
         var frame = document.getElementById('frame');
-        var safeBase = base || 'http://127.0.0.1:8000';
+        var safeBase = 'https://tunnel.tunara.online/t/${tunnelId}';
         var processed = html.replace(/<base[^>]*>/gi, '');
 
         var inject = '<base href="' + safeBase + '/">'
@@ -570,18 +561,7 @@ io.on('connection', (socket) => {
         if (redirectUrl) {
             io.to(viewerSocketId).emit('redirect', { url: redirectUrl });
         } else {
-            let localUrl = '';
-            let tunnelPublicUrl = '';
-            for (const [tid, tunnel] of tunnels) {
-                const room = io.sockets.adapter.rooms.get(tid);
-                if (room && room.has(viewerSocketId)) {
-                    localUrl = tunnel.localUrl;
-                    tunnelPublicUrl = `https://tunnel.tunara.online/t/${tid}`;
-                    break;
-                }
-            }
-            const fixedHtml = rewriteAssets(html, localUrl, tunnelPublicUrl);
-            io.to(viewerSocketId).emit('page-content', { html: fixedHtml, cookies, csrfToken, currentPath });
+            io.to(viewerSocketId).emit('page-content', { html, cookies, csrfToken, currentPath });
         }
     });
 
@@ -589,18 +569,7 @@ io.on('connection', (socket) => {
         if (redirectUrl) {
             io.to(viewerSocketId).emit('redirect', { url: redirectUrl });
         } else {
-            let localUrl = '';
-            let tunnelPublicUrl = '';
-            for (const [tid, tunnel] of tunnels) {
-                const room = io.sockets.adapter.rooms.get(tid);
-                if (room && room.has(viewerSocketId)) {
-                    localUrl = tunnel.localUrl;
-                    tunnelPublicUrl = `https://tunnel.tunara.online/t/${tid}`;
-                    break;
-                }
-            }
-            const fixedHtml = rewriteAssets(html, localUrl, tunnelPublicUrl);
-            io.to(viewerSocketId).emit('page-content', { html: fixedHtml, cookies, csrfToken, currentPath });
+            io.to(viewerSocketId).emit('page-content', { html, cookies, csrfToken, currentPath });
         }
     });
 
