@@ -561,7 +561,8 @@ io.on('connection', (socket) => {
         if (redirectUrl) {
             io.to(viewerSocketId).emit('redirect', { url: redirectUrl });
         } else {
-            io.to(viewerSocketId).emit('page-content', { html, cookies, csrfToken, currentPath });
+            const tunnelId = getTunnelIdByViewer(viewerSocketId);
+            io.to(viewerSocketId).emit('page-content', { html: replaceLocalUrls(html, tunnelId), cookies, csrfToken, currentPath });
         }
     });
 
@@ -569,7 +570,8 @@ io.on('connection', (socket) => {
         if (redirectUrl) {
             io.to(viewerSocketId).emit('redirect', { url: redirectUrl });
         } else {
-            io.to(viewerSocketId).emit('page-content', { html, cookies, csrfToken, currentPath });
+            const tunnelId = getTunnelIdByViewer(viewerSocketId);
+            io.to(viewerSocketId).emit('page-content', { html: replaceLocalUrls(html, tunnelId), cookies, csrfToken, currentPath });
         }
     });
 
@@ -593,3 +595,19 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`Tunnel Server running on port ${PORT}`);
 });
+
+function replaceLocalUrls(html, tunnelId) {
+    if (typeof html !== 'string') return html;
+    const publicUrl = `https://tunnel.tunara.online/t/${tunnelId}`;
+    return html
+        .replace(/https?:\/\/127\.0\.0\.1:\d+/g, publicUrl)
+        .replace(/https?:\/\/localhost:\d+/g, publicUrl);
+}
+
+function getTunnelIdByViewer(viewerSocketId) {
+    for (const [tunnelId, tunnel] of tunnels) {
+        const room = io.sockets.adapter.rooms.get(tunnelId);
+        if (room && room.has(viewerSocketId)) return tunnelId;
+    }
+    return null;
+}
