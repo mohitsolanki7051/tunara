@@ -112,12 +112,16 @@ app.use('/t/:tunnelId', async (req, res, next) => {
     
     try {
         const response = await fetch(`${localUrl}/${filePath}`);
+            console.log(`Fetch: ${localUrl}/${filePath} → status: ${response.status}`);
+
         if (!response.ok) return next();
         const buffer = await response.arrayBuffer();
         const contentType = response.headers.get('content-type') || 'application/octet-stream';
         res.set('Content-Type', contentType);
         res.send(Buffer.from(buffer));
     } catch(e) {
+            console.log(`Fetch error: ${e.message}`);
+
         next();
     }
 });
