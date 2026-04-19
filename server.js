@@ -503,43 +503,62 @@ io.on('connection', (socket) => {
         io.to(tunnelId).emit('host-online');
     });
 
-   socket.on('viewer-join', async ({ tunnelId, path, password }) => {
-        const tunnel = tunnels.get(tunnelId);
-        if (!tunnel) return;
-        if (!tunnel.isOnline) { socket.emit('host-offline'); return; }
+socket.on('viewer-join', async ({ tunnelId, path, password }) => {
+    const tunnel = tunnels.get(tunnelId);
+    if (!tunnel) return;
+    if (!tunnel.isOnline) { socket.emit('host-offline'); return; }
 
-        // Already verified check
-        if (tunnel.isProtected && !socket.passwordVerified) {
-            if (!password) {
-                socket.emit('password-required');
+    // ── 1. Password check (sirf pehli baar, already verified ho toh skip) ──
+    if (tunnel.isProtected && !socket.passwordVerified) {
+        if (!password) {
+            socket.emit('password-required');
+            return;
+        }
+        try {
+            const res = await fetch(`${LARAVEL_URL}/api/tunnel/verify-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tunnel_id: tunnelId, password })
+            });
+            const data = await res.json();
+            if (!data.valid) {
+                socket.emit('password-wrong');
                 return;
             }
-            try {
-                const res = await fetch(`${LARAVEL_URL}/api/tunnel/verify-password`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ tunnel_id: tunnelId, password })
-                });
-                const data = await res.json();
-                if (!data.valid) {
-                    socket.emit('password-wrong');
-                    return;
-                }
-                // Mark as verified
-                socket.passwordVerified = true;
-            } catch(e) {
-                console.log('Laravel unreachable — allowing');
-            }
+            socket.passwordVerified = true;
+        } catch(e) {
+            console.log('Password check failed, allowing:', e.message);
         }
+    }
 
-        socket.join(tunnelId);
-        socket.emit('tunnel-info', { localUrl: tunnel.localUrl });
-        io.to(tunnel.senderSocketId).emit('request-page', {
-            requestId: Date.now() + '-' + Math.random(),
-            path: path || '/',
-            viewerSocketId: socket.id
-        });
+    // ── 2. Request limit check ──
+    try {
+        const limitRes = await fetch(`${LARAVEL_URL}/api/request/check/${tunnelId}`);
+        const limitData = await limitRes.json();
+        if (limitData.limited) {
+            socket.emit('request-limited', { message: 'Daily request limit reached.' });
+            return;
+        }
+    } catch(e) {
+        console.log('Limit check failed, allowing:', e.message);
+    }
+
+    // ── 3. Request log (async, non-blocking) ──
+    fetch(`${LARAVEL_URL}/api/request/log`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tunnel_id: tunnelId, path: path || '/', method: 'GET' })
+    }).catch(e => console.log('Log failed:', e.message));
+
+    // ── 4. Forward request to sender ──
+    socket.join(tunnelId);
+    socket.emit('tunnel-info', { localUrl: tunnel.localUrl });
+    io.to(tunnel.senderSocketId).emit('request-page', {
+        requestId: Date.now() + '-' + Math.random(),
+        path: path || '/',
+        viewerSocketId: socket.id
     });
+});
 
     socket.on('forward-request', (data) => {
         const { method, url, body, headers, viewerSocketId } = data;
