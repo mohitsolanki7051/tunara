@@ -94,7 +94,7 @@ app.get('/', (req, res) => {
     res.send(`<h1>Tunnel Server</h1><p>Active tunnels: ${tunnels.size}</p>`);
 });
 
-app.get('/t/:tunnelId/*', async (req, res) => {
+app.get('/t/:tunnelId/:assetPath(*)', async (req, res) => {
     const { tunnelId } = req.params;
     const assetPath = '/' + req.params[0];
 
