@@ -94,6 +94,35 @@ app.get('/', (req, res) => {
     res.send(`<h1>Tunnel Server</h1><p>Active tunnels: ${tunnels.size}</p>`);
 });
 
+app.get('/t/:tunnelId/*', async (req, res) => {
+    const { tunnelId } = req.params;
+    const assetPath = '/' + req.params[0];
+
+    const tunnel = tunnels.get(tunnelId);
+    if (!tunnel || !tunnel.isOnline) {
+        return res.status(404).send('Asset not available');
+    }
+
+    const requestId = Date.now() + '-' + Math.random();
+
+    const timeout = setTimeout(() => {
+        res.status(504).send('Asset timeout');
+    }, 10000);
+
+    io.to(tunnel.senderSocketId).emit('request-asset', {
+        requestId,
+        path: assetPath,
+    });
+
+    io.once(`asset-response-${requestId}`, (data) => {
+        clearTimeout(timeout);
+        if (data.error) return res.status(404).send('Asset not found');
+        const buf = Buffer.from(data.data, 'base64');
+        res.setHeader('Content-Type', data.contentType || 'application/octet-stream');
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        res.send(buf);
+    });
+});
 // ============ VIEWER PAGE ============
 
 app.get('/t/:tunnelId', (req, res) => {
