@@ -102,6 +102,10 @@ app.use('/t/:tunnelId', async (req, res, next) => {
         return next();
     }
 
+     if (req.method !== 'GET') {
+        return next();
+    }
+
     const tunnel = tunnels.get(tunnelId);
     if (!tunnel || !tunnel.isOnline) {
         console.log(`Asset: tunnel not found/offline: ${tunnelId}`);
