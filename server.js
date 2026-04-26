@@ -102,13 +102,16 @@ app.use('/t/:tunnelId', async (req, res, next) => {
     if (assetPath === '/' || assetPath === '') {
         return next();
     }
+    console.log(`Asset request: ${tunnelId} -> ${assetPath}`); 
 
     const tunnel = tunnels.get(tunnelId);
     if (!tunnel || !tunnel.isOnline) {
+         console.log(`Tunnel not found or offline: ${tunnelId}`); 
         return res.status(404).send('Asset not available');
     }
 
     const requestId = Date.now() + '-' + Math.random();
+    console.log(`Emitting request-asset: ${requestId}`); 
 
     const timeout = setTimeout(() => {
         res.status(504).send('Asset timeout');
