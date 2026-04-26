@@ -98,37 +98,43 @@ app.use('/t/:tunnelId', async (req, res, next) => {
     const { tunnelId } = req.params;
     const assetPath = req.path;
 
-    // Agar root path hai toh viewer page serve karo
     if (assetPath === '/' || assetPath === '') {
         return next();
     }
-    console.log(`Asset request: ${tunnelId} -> ${assetPath}`); 
 
     const tunnel = tunnels.get(tunnelId);
     if (!tunnel || !tunnel.isOnline) {
-         console.log(`Tunnel not found or offline: ${tunnelId}`); 
+        console.log(`Asset: tunnel not found/offline: ${tunnelId}`);
         return res.status(404).send('Asset not available');
     }
 
+    const senderSocket = io.sockets.sockets.get(tunnel.senderSocketId);
+    if (!senderSocket) {
+        console.log(`Asset: sender socket not found: ${tunnel.senderSocketId}`);
+        return res.status(404).send('Sender not connected');
+    }
+
     const requestId = Date.now() + '-' + Math.random();
-    console.log(`Emitting request-asset: ${requestId}`); 
+    console.log(`Asset: emitting to sender ${tunnel.senderSocketId} -> ${assetPath}`);
 
     const timeout = setTimeout(() => {
+        console.log(`Asset: timeout for ${assetPath}`);
         res.status(504).send('Asset timeout');
     }, 10000);
 
-    io.to(tunnel.senderSocketId).emit('request-asset', {
-        requestId,
-        path: assetPath,
-    });
-
-    io.once(`asset-response-${requestId}`, (data) => {
+    senderSocket.once(`asset-response-${requestId}`, (data) => {
         clearTimeout(timeout);
+        console.log(`Asset: response received for ${assetPath}, error: ${data.error}`);
         if (data.error) return res.status(404).send('Asset not found');
         const buf = Buffer.from(data.data, 'base64');
         res.setHeader('Content-Type', data.contentType || 'application/octet-stream');
         res.setHeader('Cache-Control', 'public, max-age=3600');
         res.send(buf);
+    });
+
+    senderSocket.emit('request-asset', {
+        requestId,
+        path: assetPath,
     });
 });
 // ============ VIEWER PAGE ============
