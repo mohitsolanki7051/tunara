@@ -94,9 +94,14 @@ app.get('/', (req, res) => {
     res.send(`<h1>Tunnel Server</h1><p>Active tunnels: ${tunnels.size}</p>`);
 });
 
-app.get('/t/:tunnelId/:assetPath(*)', async (req, res) => {
+app.use('/t/:tunnelId', async (req, res, next) => {
     const { tunnelId } = req.params;
-    const assetPath = '/' + req.params[0];
+    const assetPath = req.path;
+
+    // Agar root path hai toh viewer page serve karo
+    if (assetPath === '/' || assetPath === '') {
+        return next();
+    }
 
     const tunnel = tunnels.get(tunnelId);
     if (!tunnel || !tunnel.isOnline) {
