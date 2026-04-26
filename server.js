@@ -452,7 +452,7 @@ app.get('/t/:tunnelId', (req, res) => {
 
     function renderPage(html, base, path) {
         var frame = document.getElementById('frame');
-        var safeBase = base || 'http://127.0.0.1:8000';
+        var safeBase = window.location.origin + '/t/' + TUNNEL_ID;
         var processed = html.replace(/<base[^>]*>/gi, '');
 
         var inject = '<base href="' + safeBase + '/">'
