@@ -102,33 +102,34 @@ app.use('/t/:tunnelId', async (req, res, next) => {
         return next();
     }
 
-     if (req.method !== 'GET') {
+    if (req.method !== 'GET') {
+        return next();
+    }
+
+    // Sirf asset extensions handle karo
+    const assetExtensions = /\.(png|jpg|jpeg|gif|svg|ico|webp|css|js|woff|woff2|ttf|eot|mp4|mp3|pdf)$/i;
+    if (!assetExtensions.test(assetPath)) {
         return next();
     }
 
     const tunnel = tunnels.get(tunnelId);
     if (!tunnel || !tunnel.isOnline) {
-        console.log(`Asset: tunnel not found/offline: ${tunnelId}`);
         return res.status(404).send('Asset not available');
     }
 
     const senderSocket = io.sockets.sockets.get(tunnel.senderSocketId);
     if (!senderSocket) {
-        console.log(`Asset: sender socket not found: ${tunnel.senderSocketId}`);
         return res.status(404).send('Sender not connected');
     }
 
     const requestId = Date.now() + '-' + Math.random();
-    console.log(`Asset: emitting to sender ${tunnel.senderSocketId} -> ${assetPath}`);
 
     const timeout = setTimeout(() => {
-        console.log(`Asset: timeout for ${assetPath}`);
         res.status(504).send('Asset timeout');
     }, 10000);
 
     senderSocket.once(`asset-response-${requestId}`, (data) => {
         clearTimeout(timeout);
-        console.log(`Asset: response received for ${assetPath}, error: ${data.error}`);
         if (data.error) return res.status(404).send('Asset not found');
         const buf = Buffer.from(data.data, 'base64');
         res.setHeader('Content-Type', data.contentType || 'application/octet-stream');
@@ -452,7 +453,7 @@ app.get('/t/:tunnelId', (req, res) => {
 
     function renderPage(html, base, path) {
         var frame = document.getElementById('frame');
-        var safeBase = window.location.origin + '/t/' + TUNNEL_ID;
+        var safeBase = base || 'http://127.0.0.1:8000';
         var processed = html.replace(/<base[^>]*>/gi, '');
 
         var inject = '<base href="' + safeBase + '/">'
